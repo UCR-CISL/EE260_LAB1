@@ -61,7 +61,7 @@ from carla import ColorConverter as cc
 from agents.navigation.behavior_agent import BehaviorAgent  # pylint: disable=import-error
 from agents.navigation.basic_agent import BasicAgent  # pylint: disable=import-error
 from agents.navigation.constant_velocity_agent import ConstantVelocityAgent  # pylint: disable=import-error
-
+from autoagents.agent_wrapper import AgentWrapper  # pylint: disable=import-error
 
 # ==============================================================================
 # -- Global functions ----------------------------------------------------------
@@ -711,6 +711,7 @@ def game_loop(args):
     pygame.init()
     pygame.font.init()
     world = None
+    agent_wrapper = None
 
     try:
         if args.seed:
@@ -753,6 +754,8 @@ def game_loop(args):
         spawn_points = world.map.get_spawn_points()
         destination = random.choice(spawn_points).location
         agent.set_destination(destination)
+        agent_wrapper = AgentWrapper(agent, sim_world)
+        agent_wrapper.setup_sensors(world.player, False)
 
         clock = pygame.time.Clock()
 
@@ -783,7 +786,9 @@ def game_loop(args):
             world.player.apply_control(control)
 
     finally:
-
+        if agent_wrapper is not None:
+            agent_wrapper.cleanup()
+            agent_wrapper = None
         if world is not None:
             settings = world.world.get_settings()
             settings.synchronous_mode = False

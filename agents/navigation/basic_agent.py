@@ -18,6 +18,7 @@ from agents.tools.misc import (get_speed, is_within_distance,
                                get_trafficlight_trigger_location,
                                compute_distance)
 
+from autoagents.sensor_interface import SensorInterface
 
 class BasicAgent(object):
     """
@@ -102,6 +103,30 @@ class BasicAgent(object):
         self._lights_list = self._world.get_actors().filter("*traffic_light*")
         self._lights_map = {}  # Dictionary mapping a traffic light to a wp corrspoing to its trigger volume location
 
+        self.sensor_interface = SensorInterface()
+
+    def sensors(self):  # pylint: disable=no-self-use
+        """
+        Define the sensor suite required by the agent
+
+        :return: a list containing the required sensors in the following format:
+
+        [
+            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': -0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
+                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Left'},
+
+            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': 0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
+                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Right'},
+
+            {'type': 'sensor.lidar.ray_cast', 'x': 0.7, 'y': 0.0, 'z': 1.60, 'yaw': 0.0, 'pitch': 0.0, 'roll': 0.0,
+             'id': 'LIDAR'}
+        ]
+
+        """
+        sensors = []
+
+        return sensors
+
     def add_emergency_stop(self, control):
         """
         Overwrites the throttle a brake values of a control to perform an emergency stop.
@@ -185,6 +210,9 @@ class BasicAgent(object):
         start_location = start_waypoint.transform.location
         end_location = end_waypoint.transform.location
         return self._global_planner.trace_route(start_location, end_location)
+
+    def get_sensor_data(self):
+        return self.sensor_interface.get_data()
 
     def run_step(self):
         """Execute one step of navigation."""

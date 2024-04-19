@@ -61,6 +61,42 @@ class BehaviorAgent(BasicAgent):
         elif behavior == 'aggressive':
             self._behavior = Aggressive()
 
+    def sensors(self):  # pylint: disable=no-self-use
+        """
+        Define the sensor suite required by the agent
+
+        :return: a list containing the required sensors in the following format:
+
+        [
+            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': -0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
+                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Left'},
+
+            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': 0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
+                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Right'},
+
+            {'type': 'sensor.lidar.ray_cast', 'x': 0.7, 'y': 0.0, 'z': 1.60, 'yaw': 0.0, 'pitch': 0.0, 'roll': 0.0,
+             'id': 'LIDAR'}
+        ]
+
+        """
+        sensors = [
+            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': -0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
+                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Left'},
+
+            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': 0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
+                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Right'},
+
+            {'type': 'sensor.lidar.ray_cast', 'x': 0.7, 'y': 0.0, 'z': 1.60, 'yaw': 0.0, 'pitch': 0.0, 'roll': 0.0,
+                      'range': 50, # set same as camera height, cuz camera fov is 90 deg, HUD can visualize in same dimension
+                     'rotation_frequency': 20, 'channels': 64,
+                     'upper_fov': 4, 'lower_fov': -20, 'points_per_second': 2304000,
+                     'id': 'LIDAR'},
+
+            {'type': 'sensor.other.gnss', 'x': 0.7, 'y': -0.4, 'z': 1.60, 'id': 'GPS'}
+        ]
+
+        return sensors
+    
     def _update_information(self):
         """
         This method updates the information regarding the ego
@@ -243,6 +279,9 @@ class BehaviorAgent(BasicAgent):
             :param debug: boolean for debugging
             :return control: carla.VehicleControl
         """
+        sensor_data = self.get_sensor_data()
+        print("Sensor data: ", sensor_data)
+
         self._update_information()
 
         control = None
