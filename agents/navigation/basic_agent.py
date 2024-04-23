@@ -18,7 +18,7 @@ from agents.tools.misc import (get_speed, is_within_distance,
                                get_trafficlight_trigger_location,
                                compute_distance)
 
-from autoagents.sensor_interface import SensorInterface
+from agents.navigation.sensor_interface import SensorInterface
 
 class BasicAgent(object):
     """

@@ -206,7 +206,7 @@ def eval_final_results(result_stat, global_sort_detections):
                       'mrec_70': mrec_70,
                       })
 
-    print("\nTotal objects: %d" % result_stat[0.3]['gt'])
+    print("\nTotal object instances: %d" % result_stat[0.3]['gt'])
 
     print('\n=========================================\n'
           'The Average Precision at IOU 0.3 is %.2f, \n'

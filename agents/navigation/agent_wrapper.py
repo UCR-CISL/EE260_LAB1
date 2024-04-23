@@ -13,7 +13,7 @@ from __future__ import print_function
 
 import carla
 
-from autoagents.sensor_interface import CallBack
+from agents.navigation.sensor_interface import CallBack
 
 
 class AgentWrapper(object):
