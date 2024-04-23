@@ -346,8 +346,7 @@ class BehaviorAgent(BasicAgent):
             :return control: carla.VehicleControl
         """
         sensor_data = self.get_sensor_data()
-        # detections = self._detector.detect(sensor_data)
-        detections = self.gt_actors()
+        detections = self._detector.detect(sensor_data)
         gt_detections = self.gt_actors()
 
         # Evaluate detection results
