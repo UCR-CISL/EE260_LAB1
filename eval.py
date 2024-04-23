@@ -3,6 +3,7 @@
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
 
+from collections import OrderedDict
 import os
 
 import numpy as np
@@ -51,6 +52,9 @@ def convert_format(boxes_array):
                 boxes_array]
     return np.array(polygons)
 
+def box_2_polygon(box_array):
+    return Polygon([(box_array[i, 0], box_array[i, 1]) for i in range(4)])
+
 def compute_iou(box, boxes):
     """
     Compute iou between box and boxes list
@@ -69,8 +73,8 @@ def compute_iou(box, boxes):
 
     """
     # Calculate intersection areas
-    if np.any(np.array([box.union(b).area for b in boxes])==0):
-        print('debug')
+    # if np.any(np.array([box.union(b).area for b in boxes])==0):
+    #     print('debug')
     iou = [box.intersection(b).area / box.union(b).area for b in boxes]
 
     return np.array(iou, dtype=np.float32)
@@ -202,6 +206,10 @@ def eval_final_results(result_stat, global_sort_detections):
                       'mrec_70': mrec_70,
                       })
 
-    print('The Average Precision at IOU 0.3 is %.2f, '
-          'The Average Precision at IOU 0.5 is %.2f, '
-          'The Average Precision at IOU 0.7 is %.2f' % (ap_30, ap_50, ap_70))
+    print("\nTotal objects: %d" % result_stat[0.3]['gt'])
+
+    print('\n=========================================\n'
+          'The Average Precision at IOU 0.3 is %.2f, \n'
+          'The Average Precision at IOU 0.5 is %.2f, \n'
+          'The Average Precision at IOU 0.7 is %.2f. \n'
+          '=========================================\n' % (ap_30, ap_50, ap_70))

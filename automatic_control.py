@@ -63,6 +63,7 @@ from agents.navigation.basic_agent import BasicAgent  # pylint: disable=import-e
 from agents.navigation.constant_velocity_agent import ConstantVelocityAgent  # pylint: disable=import-error
 from autoagents.agent_wrapper import AgentWrapper  # pylint: disable=import-error
 
+
 # ==============================================================================
 # -- Global functions ----------------------------------------------------------
 # ==============================================================================
@@ -782,8 +783,9 @@ def game_loop(args):
                     break
 
             control = agent.run_step()
-            control.manual_gear_shift = False
-            world.player.apply_control(control)
+            if control is not None:
+                control.manual_gear_shift = False
+                world.player.apply_control(control)
 
     finally:
         if agent_wrapper is not None:
@@ -795,7 +797,7 @@ def game_loop(args):
             settings.fixed_delta_seconds = None
             world.world.apply_settings(settings)
             traffic_manager.set_synchronous_mode(True)
-
+            agent.destroy()
             world.destroy()
 
         pygame.quit()

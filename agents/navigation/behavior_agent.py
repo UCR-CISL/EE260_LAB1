@@ -8,14 +8,19 @@
 waypoints and avoiding other vehicles. The agent also responds to traffic lights,
 traffic signs, and has different possible configurations. """
 
+from collections import OrderedDict
+import math
 import random
 import numpy as np
 import carla
+from eval import box_2_polygon, caluclate_tp_fp, eval_final_results
 from agents.navigation.basic_agent import BasicAgent
 from agents.navigation.local_planner import RoadOption
 from agents.navigation.behavior_types import Cautious, Aggressive, Normal
 
 from agents.tools.misc import get_speed, positive, is_within_distance, compute_distance
+from detector import Detector  # pylint: disable=import-rror
+from shapely.geometry import Polygon
 
 class BehaviorAgent(BasicAgent):
     """
@@ -61,41 +66,20 @@ class BehaviorAgent(BasicAgent):
         elif behavior == 'aggressive':
             self._behavior = Aggressive()
 
+        # Initalize the detector
+        self._detector = Detector()
+
+        # Evaluate detection results
+        self.result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
+                            0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
+                            0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}
+
+    def destroy(self):
+        eval_final_results(self.result_stat, global_sort_detections=True)
+        
+
     def sensors(self):  # pylint: disable=no-self-use
-        """
-        Define the sensor suite required by the agent
-
-        :return: a list containing the required sensors in the following format:
-
-        [
-            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': -0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
-                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Left'},
-
-            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': 0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
-                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Right'},
-
-            {'type': 'sensor.lidar.ray_cast', 'x': 0.7, 'y': 0.0, 'z': 1.60, 'yaw': 0.0, 'pitch': 0.0, 'roll': 0.0,
-             'id': 'LIDAR'}
-        ]
-
-        """
-        sensors = [
-            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': -0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
-                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Left'},
-
-            {'type': 'sensor.camera.rgb', 'x': 0.7, 'y': 0.4, 'z': 1.60, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
-                      'width': 300, 'height': 200, 'fov': 100, 'id': 'Right'},
-
-            {'type': 'sensor.lidar.ray_cast', 'x': 0.7, 'y': 0.0, 'z': 1.60, 'yaw': 0.0, 'pitch': 0.0, 'roll': 0.0,
-                      'range': 50, # set same as camera height, cuz camera fov is 90 deg, HUD can visualize in same dimension
-                     'rotation_frequency': 20, 'channels': 64,
-                     'upper_fov': 4, 'lower_fov': -20, 'points_per_second': 2304000,
-                     'id': 'LIDAR'},
-
-            {'type': 'sensor.other.gnss', 'x': 0.7, 'y': -0.4, 'z': 1.60, 'id': 'GPS'}
-        ]
-
-        return sensors
+        return self._detector.sensors()
     
     def _update_information(self):
         """
@@ -272,6 +256,88 @@ class BehaviorAgent(BasicAgent):
 
         return control
 
+    def gt_box_vertice_sequence(self, box):
+        box = [box[1],
+               box[3],
+               box[7],
+               box[5],
+               box[0],
+               box[2],
+               box[6],
+               box[4]]
+        return np.array(box)
+
+    def actor_detected(self, actor, detection_results, actor_class):
+        """
+            actor: carla.Actor
+            detection_results: dict
+            actor_class: 0 for vehicle, 1 for pedestrian, 2 for cyclist
+        """
+        # Prepare GT box
+        
+        gt_box = [[v.x, v.y, v.z] for v in actor.bounding_box.get_world_vertices(actor.get_transform())]
+        gt_box = self.gt_box_vertice_sequence(gt_box)
+        gt_polygon = box_2_polygon(gt_box)
+        # Compare detection boxes with GT boxes
+        if ("det_boxes" not in detection_results) or ("det_class" not in detection_results):
+            return False
+        det_boxes = detection_results["det_boxes"]
+        classes = detection_results["det_class"]
+        for obj_id in range(len(classes)):
+            if classes[obj_id] != actor_class:
+                continue
+            polygon = box_2_polygon(det_boxes[obj_id])
+            
+            union = polygon.union(gt_polygon).area
+            if union == 0:
+                return False
+            try: 
+                iou = polygon.intersection(gt_polygon).area / union
+                if iou > 0.5:
+                    return True
+            except:
+                print(polygon)
+        return False
+
+    def gt_actors(self):
+        """
+        Get all the ground truth actors in the scene
+        """
+        actor_list = self._world.get_actors()
+        vehicles = actor_list.filter("*vehicle*")
+        walkers = actor_list.filter("*walker.pedestrian*")
+        detection_results = dict()
+        detection_results["det_boxes"] = []
+        detection_results["det_class"] = []
+        detection_results["det_score"] = []
+        transform = self._vehicle.get_transform()
+        def dist(l):
+            return math.sqrt((l.x - transform.location.x)**2 + (l.y - transform.location.y)
+                             ** 2 + (l.z - transform.location.z)**2)
+        for v in vehicles:
+            if dist(v.get_location()) > 50:
+                continue
+            if v.id == self._vehicle.id:
+                continue
+            bbox = [[v.x, v.y, v.z] for v in v.bounding_box.get_world_vertices(v.get_transform())]
+            bbox = self.gt_box_vertice_sequence(bbox)
+            detection_results["det_boxes"].append(bbox)
+            detection_results["det_class"].append(0)
+            detection_results["det_score"].append(1.0)
+        for w in walkers:
+            if dist(w.get_location()) > 50:
+                continue
+            bbox = [[w.x, w.y, w.z] for w in w.bounding_box.get_world_vertices(w.get_transform())]
+            bbox = self.gt_box_vertice_sequence(bbox)
+            detection_results["det_boxes"].append(bbox)
+            detection_results["det_class"].append(1)
+            detection_results["det_score"].append(1.0)
+        detection_results["det_boxes"] = np.array(detection_results["det_boxes"])
+        detection_results["det_class"] = np.array(detection_results["det_class"])
+        detection_results["det_score"] = np.array(detection_results["det_score"])
+        return detection_results
+
+
     def run_step(self, debug=False):
         """
         Execute one step of navigation.
@@ -280,7 +346,21 @@ class BehaviorAgent(BasicAgent):
             :return control: carla.VehicleControl
         """
         sensor_data = self.get_sensor_data()
-        print("Sensor data: ", sensor_data)
+        # detections = self._detector.detect(sensor_data)
+        detections = self.gt_actors()
+        gt_detections = self.gt_actors()
+
+        # Evaluate detection results
+        det_boxes = np.array([[[0,0,0],[0,1,0],[1,1,0],[1,0,0],[0,0,1],[0,1,1],[1,1,1],[1,0,1]]])
+        det_score = np.array([0])
+        if "det_boxes" in detections:
+            det_boxes = detections["det_boxes"]
+        if "det_score" in detections:
+            det_score = detections["det_score"]
+            
+        caluclate_tp_fp(det_boxes, det_score, gt_detections["det_boxes"], self.result_stat, iou_thresh=0.3)
+        caluclate_tp_fp(det_boxes, det_score, gt_detections["det_boxes"], self.result_stat, iou_thresh=0.5)
+        caluclate_tp_fp(det_boxes, det_score, gt_detections["det_boxes"], self.result_stat, iou_thresh=0.7)
 
         self._update_information()
 
@@ -299,31 +379,33 @@ class BehaviorAgent(BasicAgent):
         walker_state, walker, w_distance = self.pedestrian_avoid_manager(ego_vehicle_wp)
 
         if walker_state:
-            # Distance is computed from the center of the two cars,
-            # we use bounding boxes to calculate the actual distance
-            distance = w_distance - max(
-                walker.bounding_box.extent.y, walker.bounding_box.extent.x) - max(
-                    self._vehicle.bounding_box.extent.y, self._vehicle.bounding_box.extent.x)
+            if self.actor_detected(walker, detections, 1):
+                # Distance is computed from the center of the two cars,
+                # we use bounding boxes to calculate the actual distance
+                distance = w_distance - max(
+                    walker.bounding_box.extent.y, walker.bounding_box.extent.x) - max(
+                        self._vehicle.bounding_box.extent.y, self._vehicle.bounding_box.extent.x)
 
-            # Emergency brake if the car is very close.
-            if distance < self._behavior.braking_distance:
-                return self.emergency_stop()
+                # Emergency brake if the car is very close.
+                if distance < self._behavior.braking_distance:
+                    return self.emergency_stop()
 
         # 2.2: Car following behaviors
         vehicle_state, vehicle, distance = self.collision_and_car_avoid_manager(ego_vehicle_wp)
 
         if vehicle_state:
-            # Distance is computed from the center of the two cars,
-            # we use bounding boxes to calculate the actual distance
-            distance = distance - max(
-                vehicle.bounding_box.extent.y, vehicle.bounding_box.extent.x) - max(
-                    self._vehicle.bounding_box.extent.y, self._vehicle.bounding_box.extent.x)
+            if self.actor_detected(vehicle, detections, 0):
+                # Distance is computed from the center of the two cars,
+                # we use bounding boxes to calculate the actual distance
+                distance = distance - max(
+                    vehicle.bounding_box.extent.y, vehicle.bounding_box.extent.x) - max(
+                        self._vehicle.bounding_box.extent.y, self._vehicle.bounding_box.extent.x)
 
-            # Emergency brake if the car is very close.
-            if distance < self._behavior.braking_distance:
-                return self.emergency_stop()
-            else:
-                control = self.car_following_manager(vehicle, distance)
+                # Emergency brake if the car is very close.
+                if distance < self._behavior.braking_distance:
+                    return self.emergency_stop()
+                else:
+                    control = self.car_following_manager(vehicle, distance)
 
         # 3: Intersection behavior
         elif self._incoming_waypoint.is_junction and (self._incoming_direction in [RoadOption.LEFT, RoadOption.RIGHT]):
