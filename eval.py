@@ -177,11 +177,18 @@ def calculate_ap(result_stat, iou, global_sort_detections):
 
     rec = tp[:]
     for idx, val in enumerate(tp):
-        rec[idx] = float(tp[idx]) / gt_total
+        if gt_total == 0:
+            rec[idx] = 0
+        else:
+            rec[idx] = float(tp[idx]) / gt_total
 
     prec = tp[:]
     for idx, val in enumerate(tp):
-        prec[idx] = float(tp[idx]) / (fp[idx] + tp[idx])
+        total_pos = fp[idx] + tp[idx]
+        if total_pos == 0:
+            prec[idx] = 0
+        else:
+            prec[idx] = float(tp[idx]) / total_pos
 
     ap, mrec, mprec = voc_ap(rec[:], prec[:])
 
