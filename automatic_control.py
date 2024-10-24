@@ -802,10 +802,6 @@ class CameraManager(object):
             gt_bbox = self.bbox_data.get('gt_det', {}).get('det_boxes', None)
             det_bbox = self.bbox_data.get('det', {}).get('det_boxes', None)        
 
-        # Obtain bounging boxes in image plane
-        gt_boxes = self._world2camera(gt_bbox) 
-        det_bbox = self._world2camera(det_bbox)
-
         def draw_bounding_boxes(surface, boxes, color=(0, 255, 0), thickness=2):
             if boxes is None or len(boxes) == 0:
                 return
@@ -848,6 +844,10 @@ class CameraManager(object):
             lidar_img[tuple(lidar_data.T)] = (255, 255, 255)
             self.surface = pygame.surfarray.make_surface(lidar_img)
         else:
+            # Obtain bounging boxes in image plane
+            gt_boxes = self._world2camera(gt_bbox) 
+            det_bbox = self._world2camera(det_bbox)
+
             image.convert(self.sensors[self.index][1])
             array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
             array = np.reshape(array, (image.height, image.width, 4))
