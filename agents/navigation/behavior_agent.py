@@ -76,7 +76,10 @@ class BehaviorAgent(BasicAgent):
         # Evaluate detection results
         self.result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
                             0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
-                            0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}
+                            0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}\
+        
+        # Bounding boxes
+        self.bbox = {}
 
     def destroy(self):
         eval_final_results(self.result_stat, global_sort_detections=True)
@@ -365,6 +368,14 @@ class BehaviorAgent(BasicAgent):
             det_boxes = detections["det_boxes"]
         if "det_score" in detections:
             det_score = detections["det_score"]
+        
+        frame_number = next(iter(sensor_data.values()))[0]
+
+        self.bbox = {
+            'frame':frame_number,
+            'gt_det':gt_detections,
+            'det':detections
+        }
             
         caluclate_tp_fp(det_boxes, det_score, gt_detections["det_boxes"], self.result_stat, iou_thresh=0.3)
         caluclate_tp_fp(det_boxes, det_score, gt_detections["det_boxes"], self.result_stat, iou_thresh=0.5)
