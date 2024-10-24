@@ -144,7 +144,7 @@ class World(object):
         """Restart the world"""
         # Keep same camera config if the camera manager exists.
         cam_index = self.camera_manager.index if self.camera_manager is not None else 0
-        cam_pos_id = self.camera_manager.transform_index if self.camera_manager is not None else 0
+        cam_pos_id = cam_index
 
         # Get a random blueprint.
         blueprint_list = get_actor_blueprints(self.world, self._actor_filter, self._actor_generation)
@@ -185,7 +185,7 @@ class World(object):
         self.lane_invasion_sensor = LaneInvasionSensor(self.player, self.hud)
         self.gnss_sensor = GnssSensor(self.player)
         self.camera_manager = CameraManager(self.player, self.hud)
-        self.camera_manager.transform_index = cam_pos_id
+        # self.camera_manager.transform_index = cam_pos_id
         self.camera_manager.set_sensor(cam_index, notify=False)
         actor_type = get_actor_display_name(self.player)
         self.hud.notification(actor_type)
@@ -604,21 +604,22 @@ class CameraManager(object):
         attachment = carla.AttachmentType
         self._camera_transforms = [
             (carla.Transform(carla.Location(x=-2.0*bound_x, y=+0.0*bound_y, z=2.0*bound_z), carla.Rotation(pitch=8.0)), attachment.SpringArmGhost),
-            (carla.Transform(carla.Location(x=+0.8*bound_x, y=+0.0*bound_y, z=1.3*bound_z)), attachment.Rigid),
-            (carla.Transform(carla.Location(x=+1.9*bound_x, y=+1.0*bound_y, z=1.2*bound_z)), attachment.SpringArmGhost),
-            (carla.Transform(carla.Location(x=-2.8*bound_x, y=+0.0*bound_y, z=4.6*bound_z), carla.Rotation(pitch=6.0)), attachment.SpringArmGhost),
-            (carla.Transform(carla.Location(x=-1.0, y=-1.0*bound_y, z=0.4*bound_z)), attachment.Rigid)]
+            # (carla.Transform(carla.Location(x=+0.8*bound_x, y=+0.0*bound_y, z=1.3*bound_z)), attachment.Rigid),
+            # (carla.Transform(carla.Location(x=+1.9*bound_x, y=+1.0*bound_y, z=1.2*bound_z)), attachment.SpringArmGhost),
+            # (carla.Transform(carla.Location(x=-2.8*bound_x, y=+0.0*bound_y, z=4.6*bound_z), carla.Rotation(pitch=6.0)), attachment.SpringArmGhost),
+            # (carla.Transform(carla.Location(x=-1.0, y=-1.0*bound_y, z=0.4*bound_z)), attachment.Rigid),
+            ]
 
-        self.transform_index = 1
+        # self.transform_index = 1
         self.sensors = [
             ['sensor.camera.rgb', cc.Raw, 'Camera RGB'],
-            ['sensor.camera.depth', cc.Raw, 'Camera Depth (Raw)'],
-            ['sensor.camera.depth', cc.Depth, 'Camera Depth (Gray Scale)'],
-            ['sensor.camera.depth', cc.LogarithmicDepth, 'Camera Depth (Logarithmic Gray Scale)'],
-            ['sensor.camera.semantic_segmentation', cc.Raw, 'Camera Semantic Segmentation (Raw)'],
-            ['sensor.camera.semantic_segmentation', cc.CityScapesPalette,
-             'Camera Semantic Segmentation (CityScapes Palette)'],
-            ['sensor.lidar.ray_cast', None, 'Lidar (Ray-Cast)'],
+            # ['sensor.camera.depth', cc.Raw, 'Camera Depth (Raw)'],
+            # ['sensor.camera.depth', cc.Depth, 'Camera Depth (Gray Scale)'],
+            # ['sensor.camera.depth', cc.LogarithmicDepth, 'Camera Depth (Logarithmic Gray Scale)'],
+            # ['sensor.camera.semantic_segmentation', cc.Raw, 'Camera Semantic Segmentation (Raw)'],
+            # ['sensor.camera.semantic_segmentation', cc.CityScapesPalette,
+            #  'Camera Semantic Segmentation (CityScapes Palette)'],
+            # ['sensor.lidar.ray_cast', None, 'Lidar (Ray-Cast)'],
             ]
         world = self._parent.get_world()
         bp_library = world.get_blueprint_library()
@@ -632,25 +633,56 @@ class CameraManager(object):
             item.append(blp)
         self.index = None
 
+    def add_sensor(self, sensor_info):
+        """Add a sensor
+            sensor_info: defined from autonomous (behavior) agent
+        """
+        world = self._parent.get_world()
+        bp_library = world.get_blueprint_library()
+        for s in sensor_info:
+            if s['type'] not in ['sensor.camera.rgb', 'sensor.camera.depth', 'sensor.lidar.ray_cast']:
+                continue
+            sensor = [s['type'], cc.Raw if s['type'] == 'sensor.camera.rgb' else None, s['id']]
+            transform = (carla.Transform(carla.Location(x=s['x'], y=s['y'], z=s['z']), 
+                                         carla.Rotation(pitch=s['pitch'], yaw=s['yaw'], roll=s['roll'])), 
+                         carla.AttachmentType.Rigid)
+            
+
+            blp = bp_library.find(sensor[0])
+            if sensor[0].startswith('sensor.camera'):
+                blp.set_attribute('image_size_x', str(s['width']))
+                blp.set_attribute('image_size_y', str(s['height']))
+                blp.set_attribute('fov', str(s['fov']))
+            elif sensor[0].startswith('sensor.lidar'):
+                blp.set_attribute('range', str(s['range']))
+                blp.set_attribute('rotation_frequency', str(s['rotation_frequency']))
+                blp.set_attribute('channels', str(s['channels']))
+                blp.set_attribute('upper_fov', str(s['upper_fov']))
+                blp.set_attribute('lower_fov', str(s['lower_fov']))
+                blp.set_attribute('points_per_second', str(s['points_per_second']))
+            sensor.append(blp)
+
+            self.sensors.append(sensor)
+            self._camera_transforms.append(transform)
+
     def toggle_camera(self):
         """Activate a camera"""
-        self.transform_index = (self.transform_index + 1) % len(self._camera_transforms)
+        self.index = (self.index + 1) % len(self._camera_transforms)
         self.set_sensor(self.index, notify=False, force_respawn=True)
 
     def set_sensor(self, index, notify=True, force_respawn=False):
         """Set a sensor"""
         index = index % len(self.sensors)
-        needs_respawn = True if self.index is None else (
-            force_respawn or (self.sensors[index][0] != self.sensors[self.index][0]))
+        needs_respawn = True if self.index is None else (force_respawn)
         if needs_respawn:
             if self.sensor is not None:
                 self.sensor.destroy()
                 self.surface = None
             self.sensor = self._parent.get_world().spawn_actor(
                 self.sensors[index][-1],
-                self._camera_transforms[self.transform_index][0],
+                self._camera_transforms[index][0],
                 attach_to=self._parent,
-                attachment_type=self._camera_transforms[self.transform_index][1])
+                attachment_type=self._camera_transforms[index][1])
 
             # We need to pass the lambda a weak reference to
             # self to avoid circular reference.
@@ -754,6 +786,8 @@ def game_loop(args):
             agent.follow_speed_limits(True)
         elif args.agent == "Behavior":
             agent = BehaviorAgent(world.player, behavior=args.behavior)
+        
+        world.camera_manager.add_sensor(agent.sensors())
 
         # Set the agent destination
         spawn_points = world.map.get_spawn_points()

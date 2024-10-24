@@ -56,6 +56,10 @@ class BehaviorAgent(BasicAgent):
         self._behavior = None
         self._sampling_resolution = 4.5
 
+        self.bound_x = vehicle.bounding_box.extent.x
+        self.bound_y = vehicle.bounding_box.extent.y
+        self.bound_z = vehicle.bounding_box.extent.z
+
         # Parameters for agent behavior
         if behavior == 'cautious':
             self._behavior = Cautious()
@@ -79,7 +83,12 @@ class BehaviorAgent(BasicAgent):
         
 
     def sensors(self):  # pylint: disable=no-self-use
-        return self._detector.sensors()
+        sensors = self._detector.sensors()
+        for s in sensors:
+            s['x'] = s['x']*self.bound_x
+            s['y'] = s['y']*self.bound_y
+            s['z'] = s['z']*self.bound_z
+        return sensors
     
     def _update_information(self):
         """
