@@ -723,8 +723,13 @@ class CameraManager(object):
             return
 
         def project_to_image(points_3d, K):
+            # Only project points with positive Z (in front of camera)
+            points_in_front = points_3d[points_3d[:, 2] > 0]
+            if len(points_in_front) == 0:
+                return None
+
             # Convert to homogeneous coordinates
-            points_2d = np.dot(K, points_3d.T)
+            points_2d = np.dot(K, points_in_front.T)
             
             # Normalize by Z coordinate
             points_2d = points_2d[:2] / points_2d[2]
@@ -769,7 +774,8 @@ class CameraManager(object):
         K = get_k_matrix(width,height,fov)
         
         # Project points from world to camera coordinates
-        inv_matrix = self._camera_transforms[self.index][0].get_inverse_matrix()
+        # inv_matrix = self._camera_transforms[self.index][0].get_inverse_matrix()
+        inv_matrix = np.array(self.sensor.get_transform().get_inverse_matrix())
         
         image_boxes = []
         # Project camera coordinates to image plane
