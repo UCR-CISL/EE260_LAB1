@@ -64,7 +64,8 @@ from agents.navigation.basic_agent import BasicAgent  # pylint: disable=import-e
 from agents.navigation.constant_velocity_agent import ConstantVelocityAgent  # pylint: disable=import-error
 from agents.navigation.agent_wrapper import AgentWrapper  # pylint: disable=import-error
 
-
+from utils.transform import Transform
+import pdb
 # ==============================================================================
 # -- Global functions ----------------------------------------------------------
 # ==============================================================================
@@ -631,7 +632,16 @@ class CameraManager(object):
             elif item[0].startswith('sensor.lidar'):
                 blp.set_attribute('range', '50')
             item.append(blp)
-        self.index = None
+        self.index = None # Sensor index
+
+        self.bbox_data = None # Bounding boxes
+    
+    def update_bounding_boxes(self, bbox_data):
+        """Update bounding boxes for a specific sensor type
+        Args:
+            bbox_data: Bounding boxes data (world coordinates)
+        """
+        self.bbox_data = bbox_data
 
     def add_sensor(self, sensor_info):
         """Add a sensor
@@ -646,7 +656,6 @@ class CameraManager(object):
             transform = (carla.Transform(carla.Location(x=s['x'], y=s['y'], z=s['z']), 
                                          carla.Rotation(pitch=s['pitch'], yaw=s['yaw'], roll=s['roll'])), 
                          carla.AttachmentType.Rigid)
-            
 
             blp = bp_library.find(sensor[0])
             if sensor[0].startswith('sensor.camera'):
@@ -705,10 +714,124 @@ class CameraManager(object):
         """Render method"""
         if self.surface is not None:
             display.blit(self.surface, (0, 0))
+    
+    def _world2camera(self, bbox):
+        """Transform bbox points from world coordinates to camera plane
+            bbox: bounding boxes (N,x) in world coordinates
+        """
+        if bbox is None:
+            return
+
+        def project_to_image(points_3d, K):
+            # Convert to homogeneous coordinates
+            points_2d = np.dot(K, points_3d.T)
+            
+            # Normalize by Z coordinate
+            points_2d = points_2d[:2] / points_2d[2]
+            return points_2d.T
+        
+        def transform_with_matrix(points, transform_matrix):
+            """
+                points: (n, 3) numpy array of [x, y, z]
+                transform_matrix: (4, 4) numpy array
+            """
+            if points is None:
+                return
+            points = points.T
+            points = np.append(points, np.ones((1, points.shape[1])), axis=0)
+            transformed_points = transform_matrix @ points
+            return transformed_points[:3].T
+
+        def get_k_matrix(width,height,fov):
+            # (Intrinsic) K Matrix
+            K = np.identity(3)
+
+            # Calculate focal length and principal point
+            f = width / (2.0 * math.tan(fov * math.pi / 360.0))
+            cx = width / 2.0
+            cy = height / 2.0
+
+            # Construct K matrix
+            K = np.array([
+                [f, 0, cx],
+                [0, f, cy], 
+                [0, 0, 1]
+            ], dtype=np.float64)
+
+            return K
+        
+        # Obtain camera param
+        width = self.sensors[self.index][3].get_attribute('image_size_x').as_int()
+        height = self.sensors[self.index][3].get_attribute('image_size_y').as_int()
+        fov = int(self.sensors[self.index][3].get_attribute('fov').as_float())
+
+        # Compute camera intrinsic matrix
+        K = get_k_matrix(width,height,fov)
+        
+        # Project points from world to camera coordinates
+        inv_matrix = self._camera_transforms[self.index][0].get_inverse_matrix()
+        
+        image_boxes = []
+        # Project camera coordinates to image plane
+        for i, box in enumerate(bbox):
+            # World --> Camera
+            camera_box = transform_with_matrix(box, inv_matrix)
+
+            # Carla axis --> cv2 axis
+            camera_box_opencv = np.zeros_like(camera_box)
+            camera_box_opencv[:, 0] = camera_box[:, 1]    # Right
+            camera_box_opencv[:, 1] = -camera_box[:, 2]   # Down
+            camera_box_opencv[:, 2] = camera_box[:, 0]    # Forward
+
+            # Camera --> Image
+            image_box = project_to_image(camera_box_opencv,K)
+            image_boxes.append(image_box)
+
+        return np.array(image_boxes)
 
     @staticmethod
     def _parse_image(weak_self, image):
         self = weak_self()
+
+        # Obtain bounding box coords (world)
+        # First check if bbox_data exists
+        if self.bbox_data is None:
+            gt_bbox = None
+            det_bbox = None
+        else:
+            gt_bbox = self.bbox_data.get('gt_det', {}).get('det_boxes', None)
+            det_bbox = self.bbox_data.get('det', {}).get('det_boxes', None)        
+
+        # Obtain bounging boxes in image plane
+        gt_boxes = self._world2camera(gt_bbox) 
+        det_bbox = self._world2camera(det_bbox)
+
+        def draw_bounding_boxes(surface, boxes, color=(0, 255, 0), thickness=2):
+            if boxes is None or len(boxes) == 0:
+                return
+
+            for box in boxes:
+                # Convert coordinates to integers
+                points = box.astype(np.int32)
+                
+                # Draw front face
+                pygame.draw.line(surface, color, tuple(points[0]), tuple(points[1]), thickness)
+                pygame.draw.line(surface, color, tuple(points[1]), tuple(points[2]), thickness)
+                pygame.draw.line(surface, color, tuple(points[2]), tuple(points[3]), thickness)
+                pygame.draw.line(surface, color, tuple(points[3]), tuple(points[0]), thickness)
+                
+                # Draw back face
+                pygame.draw.line(surface, color, tuple(points[4]), tuple(points[5]), thickness)
+                pygame.draw.line(surface, color, tuple(points[5]), tuple(points[6]), thickness)
+                pygame.draw.line(surface, color, tuple(points[6]), tuple(points[7]), thickness)
+                pygame.draw.line(surface, color, tuple(points[7]), tuple(points[4]), thickness)
+                
+                # Draw lines connecting front and back faces
+                pygame.draw.line(surface, color, tuple(points[0]), tuple(points[4]), thickness)
+                pygame.draw.line(surface, color, tuple(points[1]), tuple(points[5]), thickness)
+                pygame.draw.line(surface, color, tuple(points[2]), tuple(points[6]), thickness)
+                pygame.draw.line(surface, color, tuple(points[3]), tuple(points[7]), thickness)
+
         if not self:
             return
         if self.sensors[self.index][0].startswith('sensor.lidar'):
@@ -730,7 +853,17 @@ class CameraManager(object):
             array = np.reshape(array, (image.height, image.width, 4))
             array = array[:, :, :3]
             array = array[:, :, ::-1]
+
             self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
+            
+            # pdb.set_trace()
+
+            # Draw Bbox on image
+            if gt_boxes is not None:
+                draw_bounding_boxes(self.surface, gt_boxes, color=(0, 255, 0))  # Green for ground truth
+            if det_bbox is not None:
+                draw_bounding_boxes(self.surface, det_bbox, color=(255, 0, 0))  # Red for detections
+
         if self.recording:
             image.save_to_disk('_out/%08d' % image.frame)
 
@@ -810,6 +943,9 @@ def game_loop(args):
             world.tick(clock)
             world.render(display)
             pygame.display.flip()
+
+            # Get bounding boxes from agent
+            world.camera_manager.update_bounding_boxes(agent.bbox)
 
             if agent.done():
                 if args.loop:
