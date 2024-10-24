@@ -27,6 +27,7 @@ try:
     from pygame.locals import KMOD_CTRL
     from pygame.locals import K_ESCAPE
     from pygame.locals import K_q
+    from pygame.locals import K_TAB
 except ImportError:
     raise RuntimeError('cannot import pygame, make sure pygame package is installed')
 
@@ -243,13 +244,15 @@ class KeyboardControl(object):
     def __init__(self, world):
         world.hud.notification("Press 'H' or '?' for help.", seconds=4.0)
 
-    def parse_events(self):
+    def parse_events(self, world):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return True
             if event.type == pygame.KEYUP:
                 if self._is_quit_shortcut(event.key):
                     return True
+                elif event.key == K_TAB:
+                    world.camera_manager.toggle_camera()
 
     @staticmethod
     def _is_quit_shortcut(key):
@@ -615,7 +618,8 @@ class CameraManager(object):
             ['sensor.camera.semantic_segmentation', cc.Raw, 'Camera Semantic Segmentation (Raw)'],
             ['sensor.camera.semantic_segmentation', cc.CityScapesPalette,
              'Camera Semantic Segmentation (CityScapes Palette)'],
-            ['sensor.lidar.ray_cast', None, 'Lidar (Ray-Cast)']]
+            ['sensor.lidar.ray_cast', None, 'Lidar (Ray-Cast)'],
+            ]
         world = self._parent.get_world()
         bp_library = world.get_blueprint_library()
         for item in self.sensors:
@@ -766,7 +770,7 @@ def game_loop(args):
                 world.world.tick()
             else:
                 world.world.wait_for_tick()
-            if controller.parse_events():
+            if controller.parse_events(world):
                 return
 
             world.tick(clock)
