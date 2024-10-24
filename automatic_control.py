@@ -813,6 +813,9 @@ class CameraManager(object):
                 return
 
             for box in boxes:
+                if box is None:
+                    continue # Handle NoneType
+
                 # Convert coordinates to integers
                 points = box.astype(np.int32)
                 
