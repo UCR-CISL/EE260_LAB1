@@ -22,6 +22,7 @@ import re
 import sys
 import weakref
 
+
 try:
     import pygame
     from pygame.locals import KMOD_CTRL
@@ -65,6 +66,7 @@ from agents.navigation.constant_velocity_agent import ConstantVelocityAgent  # p
 from agents.navigation.agent_wrapper import AgentWrapper  # pylint: disable=import-error
 
 from utils.transform import Transform
+from utils.pygame_drawing import PyGameDrawing
 import pdb
 # ==============================================================================
 # -- Global functions ----------------------------------------------------------
@@ -715,9 +717,9 @@ class CameraManager(object):
         if self.surface is not None:
             display.blit(self.surface, (0, 0))
     
-    def _world2camera(self, bbox):
-        """Transform bbox points from world coordinates to camera plane
-            bbox: bounding boxes (N,x) in world coordinates
+    def project_to_camera_pygame(self, bbox):
+        """Transform bbox points from camera 3D coordinates to camera plane
+            bbox: bounding boxes (N,x) in camera 3D coordinates
         """
         if bbox is None:
             return
@@ -734,18 +736,6 @@ class CameraManager(object):
             # Normalize by Z coordinate
             points_2d = points_2d[:2] / points_2d[2]
             return points_2d.T
-        
-        def transform_with_matrix(points, transform_matrix):
-            """
-                points: (n, 3) numpy array of [x, y, z]
-                transform_matrix: (4, 4) numpy array
-            """
-            if points is None:
-                return
-            points = points.T
-            points = np.append(points, np.ones((1, points.shape[1])), axis=0)
-            transformed_points = transform_matrix @ points
-            return transformed_points[:3].T
 
         def get_k_matrix(width,height,fov):
             # (Intrinsic) K Matrix
@@ -773,27 +763,36 @@ class CameraManager(object):
         # Compute camera intrinsic matrix
         K = get_k_matrix(width,height,fov)
         
-        # Project points from world to camera coordinates
-        # inv_matrix = self._camera_transforms[self.index][0].get_inverse_matrix()
-        inv_matrix = np.array(self.sensor.get_transform().get_inverse_matrix())
-        
         image_boxes = []
         # Project camera coordinates to image plane
         for i, box in enumerate(bbox):
-            # World --> Camera
-            camera_box = transform_with_matrix(box, inv_matrix)
-
+        
             # Carla axis --> cv2 axis
-            camera_box_opencv = np.zeros_like(camera_box)
-            camera_box_opencv[:, 0] = camera_box[:, 1]    # Right
-            camera_box_opencv[:, 1] = -camera_box[:, 2]   # Down
-            camera_box_opencv[:, 2] = camera_box[:, 0]    # Forward
-
+            camera_bbox = np.zeros_like(box)
+            camera_bbox[:, 0] = box[:, 1]    # Right
+            camera_bbox[:, 1] = -box[:, 2]   # Down
+            camera_bbox[:, 2] = box[:, 0]    # Forward
+        
             # Camera --> Image
-            image_box = project_to_image(camera_box_opencv,K)
+            image_box = project_to_image(camera_bbox,K)
+            if image_box is None:
+                continue
             image_boxes.append(image_box)
 
         return np.array(image_boxes)
+
+    def project_to_lidar_pygame(self, points):
+        """Transform lidar points from LiDAR 3D coordinates to pygame BEV 2D plane
+            lidar_data: lidar points (N,x) in LiDAR 3D coordinates
+        """
+        lidar_data = np.array(points[:, :2])
+        lidar_data *= min(self.hud.dim) / 100.0
+        lidar_data += (0.5 * self.hud.dim[0], 0.5 * self.hud.dim[1])
+        lidar_data = np.fabs(lidar_data)  # pylint: disable=assignment-from-no-return
+        lidar_data = lidar_data.astype(np.int32)
+        lidar_data = np.reshape(lidar_data, (-1, 2))
+        return lidar_data
+        
 
     @staticmethod
     def _parse_image(weak_self, image):
@@ -808,54 +807,47 @@ class CameraManager(object):
             gt_bbox = self.bbox_data.get('gt_det', {}).get('det_boxes', None)
             det_bbox = self.bbox_data.get('det', {}).get('det_boxes', None)        
 
-        def draw_bounding_boxes(surface, boxes, color=(0, 255, 0), thickness=2):
-            if boxes is None or len(boxes) == 0:
-                return
-
-            for box in boxes:
-                if box is None:
-                    continue # Handle NoneType
-
-                # Convert coordinates to integers
-                points = box.astype(np.int32)
-                
-                # Draw front face
-                pygame.draw.line(surface, color, tuple(points[0]), tuple(points[1]), thickness)
-                pygame.draw.line(surface, color, tuple(points[1]), tuple(points[2]), thickness)
-                pygame.draw.line(surface, color, tuple(points[2]), tuple(points[3]), thickness)
-                pygame.draw.line(surface, color, tuple(points[3]), tuple(points[0]), thickness)
-                
-                # Draw back face
-                pygame.draw.line(surface, color, tuple(points[4]), tuple(points[5]), thickness)
-                pygame.draw.line(surface, color, tuple(points[5]), tuple(points[6]), thickness)
-                pygame.draw.line(surface, color, tuple(points[6]), tuple(points[7]), thickness)
-                pygame.draw.line(surface, color, tuple(points[7]), tuple(points[4]), thickness)
-                
-                # Draw lines connecting front and back faces
-                pygame.draw.line(surface, color, tuple(points[0]), tuple(points[4]), thickness)
-                pygame.draw.line(surface, color, tuple(points[1]), tuple(points[5]), thickness)
-                pygame.draw.line(surface, color, tuple(points[2]), tuple(points[6]), thickness)
-                pygame.draw.line(surface, color, tuple(points[3]), tuple(points[7]), thickness)
-
         if not self:
             return
+        
+        inv_matrix = np.array(self.sensor.get_transform().get_inverse_matrix())
+        sensor_gt_box = None
+        sensor_det_box = None
+        if gt_bbox is not None:
+            reshape_gt_bbox = np.array(gt_bbox).reshape(-1, 3)
+            sensor_gt_box = Transform.transform_with_matrix(reshape_gt_bbox, inv_matrix) 
+            sensor_gt_box = np.array(sensor_gt_box).reshape(-1, gt_bbox.shape[1], 3)
+        if det_bbox is not None:
+            reshape_det_bbox = np.array(det_bbox).reshape(-1, 3)
+            sensor_det_box = Transform.transform_with_matrix(reshape_det_bbox, inv_matrix)
+            sensor_det_box = np.array(sensor_det_box).reshape(-1, det_bbox.shape[1], 3)
+
         if self.sensors[self.index][0].startswith('sensor.lidar'):
             points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
             points = np.reshape(points, (int(points.shape[0] / 4), 4))
-            lidar_data = np.array(points[:, :2])
-            lidar_data *= min(self.hud.dim) / 100.0
-            lidar_data += (0.5 * self.hud.dim[0], 0.5 * self.hud.dim[1])
-            lidar_data = np.fabs(lidar_data)  # pylint: disable=assignment-from-no-return
-            lidar_data = lidar_data.astype(np.int32)
-            lidar_data = np.reshape(lidar_data, (-1, 2))
+            
+            lidar_data = self.project_to_lidar_pygame(points)
             lidar_img_size = (self.hud.dim[0], self.hud.dim[1], 3)
             lidar_img = np.zeros(lidar_img_size)
             lidar_img[tuple(lidar_data.T)] = (255, 255, 255)
             self.surface = pygame.surfarray.make_surface(lidar_img)
+            # Draw Bbox on image
+            if sensor_gt_box is not None:
+                reshape_sensor_gt_box = np.array(sensor_gt_box).reshape(-1, 3)
+                lidar_gt_boxes = self.project_to_lidar_pygame(reshape_sensor_gt_box)
+                lidar_gt_boxes = np.array(lidar_gt_boxes).reshape(-1, sensor_gt_box.shape[1], 2)
+                PyGameDrawing.draw_bbox_in_pygame(self.surface, lidar_gt_boxes, color=(0, 255, 0))  # Green for ground truth
+            if sensor_det_box is not None:
+                reshape_sensor_det_box = np.array(sensor_det_box).reshape(-1, 3)
+                lidar_det_boxes = self.project_to_lidar_pygame(reshape_sensor_det_box)
+                lidar_det_boxes = np.array(lidar_det_boxes).reshape(-1, sensor_det_box.shape[1], 2)
+                PyGameDrawing.draw_bbox_in_pygame(self.surface, lidar_det_boxes, color=(255, 0, 0))  # Red for detections
+
+
         else:
-            # Obtain bounging boxes in image plane
-            gt_boxes = self._world2camera(gt_bbox) 
-            det_bbox = self._world2camera(det_bbox)
+            # Obtain bounging boxes in image plane            
+            camera_gt_boxes = self.project_to_camera_pygame(sensor_gt_box) 
+            camera_det_boxes = self.project_to_camera_pygame(sensor_det_box)
 
             image.convert(self.sensors[self.index][1])
             array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
@@ -868,10 +860,10 @@ class CameraManager(object):
             # pdb.set_trace()
 
             # Draw Bbox on image
-            if gt_boxes is not None:
-                draw_bounding_boxes(self.surface, gt_boxes, color=(0, 255, 0))  # Green for ground truth
-            if det_bbox is not None:
-                draw_bounding_boxes(self.surface, det_bbox, color=(255, 0, 0))  # Red for detections
+            if camera_gt_boxes is not None:
+                PyGameDrawing.draw_bbox_in_pygame(self.surface, camera_gt_boxes, color=(0, 255, 0))  # Green for ground truth
+            if camera_det_boxes is not None:
+                PyGameDrawing.draw_bbox_in_pygame(self.surface, camera_det_boxes, color=(255, 0, 0))  # Red for detections
 
         if self.recording:
             image.save_to_disk('_out/%08d' % image.frame)

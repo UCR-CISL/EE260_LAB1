@@ -35,7 +35,8 @@ class Transform(object):
         """inverse transform"""
         self._inversematrix = np.linalg.inv(self._matrix)
 
-    def transform_with_matrix(self, points, transform_matrix):
+    @staticmethod
+    def transform_with_matrix(points, transform_matrix):
         """
             points: (n, 3) numpy array of [x, y, z]
             transform_matrix: (4, 4) numpy array
@@ -49,10 +50,10 @@ class Transform(object):
         """
             points: (n, 3) numpy array of [x, y, z]
         """
-        return self.transform_with_matrix(points, self._matrix)
+        return Transform.transform_with_matrix(points, self._matrix)
 
     def inverse_transform(self, points):
         """
             points: (n, 3) numpy array of [x, y, z]
         """
-        return self.transform_with_matrix(points, self._inversematrix)
+        return Transform.transform_with_matrix(points, self._inversematrix)
