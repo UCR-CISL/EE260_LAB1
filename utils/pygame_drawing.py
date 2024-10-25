@@ -1,6 +1,6 @@
 import pygame
 import numpy as np
-
+import pdb
 
 class PyGameDrawing(object):
     def __init__(self):
@@ -18,6 +18,9 @@ class PyGameDrawing(object):
             # Convert coordinates to integers
             points = box.astype(np.int32)
             
+            if points.shape[0]<8:
+                continue
+
             # Draw front face
             pygame.draw.line(surface, color, tuple(points[0]), tuple(points[1]), thickness)
             pygame.draw.line(surface, color, tuple(points[1]), tuple(points[2]), thickness)
